@@ -28,6 +28,7 @@ add_library(CommonDarcy STATIC ${DARCY_SRCS})
 
 add_executable(Darcy main_Darcy.C)
 target_link_libraries(Darcy CommonDarcy IFEMAppCommon ${IFEM_LIBRARIES})
+list(APPEND CHECK_SOURCES ${DARCY_SRCS} main_Darcy.C)
 
 # Installation
 install(TARGETS Darcy DESTINATION bin COMPONENT bin)
