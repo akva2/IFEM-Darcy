@@ -23,6 +23,7 @@
 #include "IFEM.h"
 #include "Profiler.h"
 #include "ReactionsOnly.h"
+#include "SAM.h"
 #include "SIM1D.h"
 #include "SIM2D.h"
 #include "SIM3D.h"
@@ -38,6 +39,7 @@ SIMDarcy<Dim>::SIMDarcy (int torder) :
 {
   Dim::myProblem = &drc;
   aCode[0] = aCode[1] = 0;
+  Dim::myHeading = "Darcy solver";
 }
 
 
@@ -384,6 +386,27 @@ bool SIMDarcy<Dim>::preprocessB ()
     drc.extEner = 'y';
   return true;
 }
+
+
+template<class Dim>
+bool SIMDarcy<Dim>::assembleDiscreteTerms (const IntegrandBase*,
+                                           const TimeDomain&)
+  {
+    if (!discreteLoad)
+      return true;
+
+    if (discreteLoad->size() != this->getNoDOFs())
+      return false;
+
+    SystemVector* v = Dim::myEqSys->getVector(0);
+    for (size_t i = 1; i <= this->getNoDOFs(); ++i) {
+      int eq = Dim::mySam->getEquation(i, 1);
+      if (eq != 0)
+        v->getPtr()[eq-1] += (*discreteLoad)[i-1];
+    }
+
+    return true;
+  }
 
 
 template<class Dim>

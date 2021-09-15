@@ -142,6 +142,13 @@ public:
   //\param tp Time stepping parameters
   void printFinalNorms(const TimeStep& tp);
 
+  //! \brief Set an additional discrete load to use.
+  //! \param vec Pointer to additional load (nullptr for none)
+  void setDiscreteLoad(const std::vector<double>* vec)
+  {
+    discreteLoad = vec;
+  }
+
 protected:
   //! \brief Performs some pre-processing tasks on the FE model.
   //! \details This method is reimplemented to resolve inhomogeneous boundary
@@ -151,6 +158,10 @@ protected:
   //! \brief Performs some pre-processing tasks on the FE model.
   bool preprocessB() override;
 
+  //! \brief Assemble additional discrete load.
+  bool assembleDiscreteTerms (const IntegrandBase*,
+                              const TimeDomain&) override;
+
 private:
   Darcy drc;            //!< Darcy integrand
   const Vector* solVec; //!< Pointer to solution vector
@@ -158,6 +169,7 @@ private:
   int aCode[2];         //!< Analytical BC code (used by destructor)
   Matrix eNorm;         //!< Element wise norms
   Vectors proj;         //!< Projected solution vectors
+  const std::vector<double>* discreteLoad = nullptr; //!< Additional discrete load vector (used with CoSTA)
 };
 
 
