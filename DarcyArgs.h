@@ -29,6 +29,7 @@ class DarcyArgs : public SIMargsBase
 {
 public:
   TimeIntegration::Method timeMethod = TimeIntegration::NONE; //!< Time integration method
+  bool mixed = false; //!< Use mixed formulation
 
   //! \brief Default constructor.
   DarcyArgs() : SIMargsBase("darcy") {}

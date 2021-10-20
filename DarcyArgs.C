@@ -24,6 +24,8 @@ bool DarcyArgs::parseArg (const char* argv)
   TimeIntegration::Method tmp;
   if (argv[0] != '-')
     return false;
+  else if (strcasecmp(argv, "-mixed") == 0)
+    mixed = true;
   else if ((tmp = TimeIntegration::get(argv+1)) > TimeIntegration::NONE)
     timeMethod = tmp;
   else
@@ -39,6 +41,9 @@ bool DarcyArgs::parse (const TiXmlElement* elem)
     std::string type;
     if (utl::getAttribute(elem,"type",type))
       timeMethod = TimeIntegration::get(type);
+  }
+  if (!strcasecmp(elem->Value(),"darcy")) {
+    utl::getAttribute(elem,"mixed",mixed);
   }
 
   return this->SIMargsBase::parse(elem);

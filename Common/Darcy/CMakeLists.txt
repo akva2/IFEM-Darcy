@@ -10,6 +10,8 @@ set(DARCY_SOURCES Darcy.C
                   Darcy.h
                   DarcySolutions.C
                   DarcySolutions.h
+                  MixedDarcy.C
+                  MixedDarcy.h
                   SIMDarcy.C
                   SIMDarcy.h)
 

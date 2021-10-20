@@ -14,9 +14,14 @@
 #ifndef _SIM_DARCY_H_
 #define _SIM_DARCY_H_
 
+#include "AdaptiveSetup.h"
+#include "ASMunstruct.h"
 #include "MatVec.h"
 #include "SIMconfigure.h"
+#include "SIMdependency.h"
+#include "SIMenums.h"
 #include "SIMsolution.h"
+#include "SIMCoupledSI.h"
 
 #include <cstddef>
 #include <iosfwd>
@@ -27,6 +32,7 @@ class Darcy;
 class DataExporter;
 class TimeStep;
 class TiXmlElement;
+class VTF;
 
 
 /*!
@@ -44,7 +50,8 @@ public:
 
   //! \brief Default constructor.
   //! \param torder Order of BDF time stepping
-  explicit SIMDarcy(Darcy& itg);
+  //! \param nf Number of primary fields
+  explicit SIMDarcy(Darcy& itg, int nf = 1);
 
   //! \brief Construct from setup properties.
   //! \param torder Order of BDF time stepping
@@ -92,10 +99,21 @@ public:
   bool saveStep(const TimeStep& tp, int& nBlock);
 
   //! \brief Initialize simulator.
-  void init();
+  bool init();
+
+  bool init(const TimeStep&) { return init(); }
 
   //! \brief Computes the solution for the current time step.
   bool solveStep(const TimeStep& tp);
+
+  //! \brief Post-process solution.
+  void postSolve(const TimeStep&) {}
+
+  //! \brief Solves the linearized system of current iteration.
+  //! \param[in] tp Time stepping parameters
+  //!
+  //! \details Since this solver is linear, this is just a normal solve.
+  SIM::ConvStatus solveIteration(TimeStep& tp);
 
   //! \brief Advance time stepping
   bool advanceStep(TimeStep&);
@@ -145,8 +163,21 @@ public:
   }
 
   //! \brief Print final solution norms to terminal.
-  //\param tp Time stepping parameters
+  //! \param tp Time stepping parameters
   void printFinalNorms(const TimeStep& tp);
+
+  //! \brief Print solution solution norms to terminal.
+  void printSolNorms(const Vector& gNorm, size_t w) const;
+
+  //! \brief Print norms to screen during adaptive simulations.
+  void printExactNorms (const Vector& gNorm, size_t w = 36) const;
+
+  //! \brief Print norms to screen during adaptive simulations.
+  void printNorms (const Vectors& gNorm, size_t w = 36) const override;
+
+  //! \brief Prints a norm group to the log stream.
+  void printNormGroup(const Vector& rNorm, const Vector& fNorm,
+                      const std::string& name) const override;
 
 protected:
   //! \brief Performs some pre-processing tasks on the FE model.
@@ -164,6 +195,10 @@ private:
   int aCode[2];         //!< Analytical BC code (used by destructor)
   Matrix eNorm;         //!< Element wise norms
   Vectors proj;         //!< Projected solution vectors
+
+  Vector prevSol;         //!< Previous sub-iteration solution
+  int maxCycle = -1;      //!< Max number of sub-iterations
+  double cycleTol = 1e-6; //! < Convergence tolerance in sub-iterations
 };
 
 
@@ -178,6 +213,5 @@ struct SolverConfigurator<SIMDarcy<Dim>> {
             const typename SIMDarcy<Dim>::SetupProps& props,
             char* infile);
 };
-
 
 #endif

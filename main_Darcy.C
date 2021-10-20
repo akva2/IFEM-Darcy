@@ -11,8 +11,8 @@
 //!
 //==============================================================================
 
-#include "Darcy.h"
 #include "DarcyArgs.h"
+#include "MixedDarcy.h"
 #include "SIMDarcy.h"
 
 #include "ASMenums.h"
@@ -22,6 +22,7 @@
 #include "SIM1D.h"
 #include "SIM2D.h"
 #include "SIM3D.h"
+#include "SIMCoupledSI.h"
 #include "SIMoptions.h"
 #include "SIMSolver.h"
 #include "SIMSolverAdap.h"
@@ -36,13 +37,23 @@
 /*!
   \brief Launch a simulator using a specified solver template.
   \param infile The input file to parse
+  \param args Darcy arguments
 */
 
 template<class Dim, template<class T> class Solver>
-int runSimulator(char* infile)
+int runSimulator(char* infile, const DarcyArgs& args)
 {
-  Darcy itg(Dim::dimension);
-  SIMDarcy<Dim> darcy(itg);
+  std::unique_ptr<Darcy> itg;
+  int nf;
+  if (args.mixed) {
+    nf = 2;
+    itg = std::make_unique<MixedDarcy>(Dim::dimension,0);
+  } else {
+    nf = 1;
+    itg = std::make_unique<Darcy>(Dim::dimension,0);
+  }
+
+  SIMDarcy<Dim> darcy(*itg,nf);
   Solver<SIMDarcy<Dim>> solver(darcy);
 
   utl::profiler->start("Model input");
@@ -70,14 +81,23 @@ int runSimulator(char* infile)
 /*!
   \brief Launch a simulator using a specified solver template.
   \param infile The input file to parse
-  \param torder Time stepping order
+  \param args Darcy arguments
 */
 
 template<class Dim>
-int runSimulatorTransient(char* infile, int torder)
+int runSimulatorTransient(char* infile, const DarcyArgs& args)
 {
-  Darcy itg(Dim::dimension, torder);
-  SIMDarcy<Dim> darcy(itg);
+  std::unique_ptr<Darcy> itg;
+  int nf;
+  if (args.mixed) {
+    nf = 2;
+    itg = std::make_unique<MixedDarcy>(Dim::dimension, TimeIntegration::Order(args.timeMethod));
+  } else {
+    nf = 1;
+    itg = std::make_unique<Darcy>(Dim::dimension, TimeIntegration::Order(args.timeMethod));
+  }
+
+  SIMDarcy<Dim> darcy(*itg,nf);
   SIMSolver<SIMDarcy<Dim>> solver(darcy);
 
   utl::profiler->start("Model input");
@@ -102,6 +122,8 @@ int runSimulatorTransient(char* infile, int torder)
   return res;
 }
 
+template<class T> using SIMDarcyAdap = SIMSolverAdapImpl<T,AdaptiveISolver<T>>;
+
 /*!
   \brief Choose a solver template and then launch a simulator.
   \param infile The input file to parse
@@ -112,11 +134,11 @@ template<class Dim>
 int runSimulator1(char* infile, const DarcyArgs& args)
 {
   if (args.adap)
-    return runSimulator<Dim, SIMSolverAdap>(infile);
-  if (args.timeMethod != TimeIntegration::NONE)
-    return runSimulatorTransient<Dim>(infile,TimeIntegration::Order(args.timeMethod));
+    return runSimulator<Dim,SIMDarcyAdap>(infile,args);
+  else if (args.timeMethod != TimeIntegration::NONE)
+    return runSimulatorTransient<Dim>(infile,args);
   else
-    return runSimulator<Dim, SIMSolverStat>(infile);
+    return runSimulator<Dim, SIMSolverStat>(infile,args);
 }
 
 /*!
@@ -183,6 +205,8 @@ int main (int argc, char** argv)
 
   IFEM::cout <<"\nInput file: "<< infile;
   IFEM::getOptions().print(IFEM::cout) << std::endl;
+  if (args.mixed)
+    IFEM::cout << "Using mixed formulation." << std::endl;
   utl::profiler->stop("Initialization");
 
   if (args.dim == 3)

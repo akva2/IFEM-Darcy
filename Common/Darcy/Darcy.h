@@ -40,7 +40,12 @@ class VecFunc;
 
 class Darcy : public IntegrandBase
 {
+protected:
   using WeakOps = EqualOrderOperators::Weak; //!< Convenience renaming
+
+  int pp = 0; //!< Block for pressure
+  int cc = 0; //!< Block for concentration
+  int cp = 0; //!< Block coupling concentration to pressure
 
 public:
   //! \brief The constructor initializes all pointers to zero.
@@ -60,13 +65,25 @@ public:
   //! \brief Returns the body force vector at a given point.
   Vec3 getBodyForce(const Vec3& X) const;
 
+  //! \brief Returns the dispersivity at a given point.
+  double getDispersivity(const Vec3& X) const;
+
   //! \brief Defines the source function.
   void setSource(RealFunc* s) { source = s; }
+
+  //! \brief Defines the concentration source function.
+  virtual void setCSource(RealFunc*) {}
 
   //! \brief Defines a scalar flux function.
   void setFlux(RealFunc* f) { flux = f; }
   //! \brief Defines a vectorial flux function.
   void setFlux(VecFunc* f) { vflux = f; }
+
+  //! \brief Defines a scalar dispersivity function.
+  void setDispersivity(RealFunc* f) { dispersivity = f; }
+
+  //! \brief Defines a scalar porosity function.
+  void setPorosity(RealFunc* f) { porosity = f; }
 
   //! \brief Evaluates the boundary fluid flux (if any) at specified point.
   double getFlux(const Vec3& X, const Vec3& normal) const;
@@ -145,19 +162,22 @@ public:
   //! \brief Returns order of time integration.
   int getOrder() const { return bdf.getActualOrder(); }
 
+  bool mixed() const { return pp != 0; }
+
   //! \brief Set gravitational acceleration.
   void setGravity(double ga) { gacc = ga; }
 
-private:
+protected:
   VecFunc*  bodyforce;    //!< Body force function
   VecFunc*  permvalues;   //!< Permeability function
   RealFunc* permeability; //!< Permeability field function
+  RealFunc* porosity;     //!< Porosity function
+  RealFunc* dispersivity; //!< Dispersivity function
   VecFunc*  vflux;        //!< Flux function
   RealFunc* flux;         //!< Flux function
   RealFunc* source;       //!< Source function
 
   GlobalIntegral* reacInt; //!< Reaction-forces-only integral
-
   TimeIntegration::BDF bdf; //!< BDF helper class
 
 public:
@@ -165,6 +185,14 @@ public:
   double gacc; //!< Gravity acceleration
 
   char extEner; //!< If \e true, external energy is to be computed
+
+  //! \brief Evaluates the secondary solution at a result point.
+  //! \param[out] s Array of solution field values at current point
+  //! \param[in] eV Element solution vectors
+  //! \param[in] fe Finite element data at current point
+  //! \param[in] X Cartesian coordinates of current point
+  bool evalDarcyVel(Vector& s, const Vectors& eV,
+                    const FiniteElement& fe, const Vec3& X) const;
 };
 
 
@@ -175,6 +203,28 @@ public:
 class DarcyNorm : public NormBase
 {
 public:
+  //! \brief Enumeration of regular norm entries
+  enum NormEntries {
+    H1_Ph = 0,
+    EXT_ENERGY,
+    H1_Ch,
+    H1_P,
+    H1_E_Ph,
+    H1_C,
+    H1_E_Ch
+  };
+
+  //! \brief Enumeration of recovery norm entries
+  enum RecoveryEntries {
+    H1_Pr = 0,
+    H1_Cr,
+    H1_Pr_Ph,
+    H1_E_Pr,
+    H1_Cr_Ch,
+    H1_E_Cr,
+    EFF_REC_Ph
+  };
+
   //! \brief The only constructor initializes its data members.
   //! \param[in] p The Poisson problem to evaluate norms for
   //! \param[in] a The analytical heat flux (optional)
@@ -218,9 +268,6 @@ public:
   //! \param[in] j The norm number (one-based index)
   //! \param[in] prefix Common prefix for all norm names
   std::string getName(size_t i, size_t j, const char* prefix) const override;
-
-  //! \brief Returns whether a norm quantity stores element contributions.
-  bool hasElementContributions(size_t i, size_t j) const override;
 
 private:
   VecFunc* anasol; //!< Analytical heat flux

@@ -40,7 +40,7 @@ Darcy::Darcy (unsigned short int n, int torder) :
   primsol.resize(1 + torder);
 
   permvalues = vflux = bodyforce = nullptr;
-  permeability = flux = source = nullptr;
+  permeability = flux = source = porosity = dispersivity = nullptr;
   reacInt = nullptr;
   extEner = false;
 }
@@ -49,6 +49,12 @@ Darcy::Darcy (unsigned short int n, int torder) :
 double Darcy::getPotential (const Vec3& X) const
 {
   return source ? (*source)(X) : 0.0;
+}
+
+
+double Darcy::getDispersivity(const Vec3& X) const
+{
+  return dispersivity ? (*dispersivity)(X) : 0.0;
 }
 
 
@@ -66,8 +72,6 @@ double Darcy::getFlux (const Vec3& X, const Vec3& normal) const
 void Darcy::setMode (SIM::SolutionMode mode)
 {
   m_mode = mode;
-
-  primsol.resize(1 + bdf.getActualOrder());
 }
 
 
@@ -110,7 +114,7 @@ bool Darcy::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
     // Evaluate the hydraulic conductivity matrix at this point
     Matrix K;
     this->formKmatrix(K,X);
-    WeakOps::LaplacianCoeff(elMat.A.front(), K, fe, 1.0/(rhow*gacc));
+    WeakOps::LaplacianCoeff(elMat.A[pp], K, fe, 1.0/(rhow*gacc));
   }
 
   if (bodyforce)
@@ -128,19 +132,19 @@ bool Darcy::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
       // Read point-wise permeabilities from a random field
       eperm *= (*permeability)(X)/gacc;
 
-    WeakOps::Divergence(elMat.b.front(), fe, eperm);
+    WeakOps::Divergence(elMat.b[pp], fe, eperm);
   }
 
   if (source)
-    WeakOps::Source(elMat.b.front(), fe, (*source)(X));
+    WeakOps::Source(elMat.b[pp], fe, (*source)(X));
 
-  if (bdf.getActualOrder() > 0 && elmInt.vec.size() > 1) {
+  if (bdf.getActualOrder() > 0 && elmInt.vec.size() > 1 && pp == 0) {
     double p = 0.0;
     for (int t = 1; t <= bdf.getOrder(); t++) {
       double val = fe.N.dot(elmInt.vec[t]);
       p -= val * bdf[t] / time.dt;
     }
-    WeakOps::Source(elMat.b.front(), fe, p);
+    WeakOps::Source(elMat.b[pp], fe, p);
     WeakOps::Mass(elMat.A.front(), fe, bdf[0] / time.dt);
   }
 
@@ -176,7 +180,7 @@ bool Darcy::evalBou (LocalIntegral& elmInt, const FiniteElement& fe,
 
   double qw = -this->getFlux(X,normal);
 
-  WeakOps::Source(elMat.b.front(), fe, qw/rhow);
+  WeakOps::Source(elMat.b[pp], fe, qw/rhow);
 
   return true;
 }
@@ -203,11 +207,18 @@ bool Darcy::formKmatrix (Matrix& K, const Vec3& X, bool inverse) const
 bool Darcy::evalSol2 (Vector& s, const Vectors& eV,
                       const FiniteElement& fe, const Vec3& X) const
 {
+  return this->evalDarcyVel(s,eV,fe,X);
+}
+
+
+bool Darcy::evalDarcyVel (Vector& s, const Vectors& eV,
+                          const FiniteElement& fe, const Vec3& X) const
+{
   // Evaluate the pressure gradient
   RealArray temp;
-  if (eV.empty() || !fe.dNdX.multiply(eV.front(),temp,true))
+  if (eV.empty() || !fe.dNdX.multiply(eV.front(),temp,1.0,0.0,true,pp == 0 ? 1 : 2))
   {
-    std::cerr <<" *** Darcy::evalSol: Invalid solution vector.\n"
+    std::cerr <<" *** Darcy::evalDarcyVel: Invalid solution vector.\n"
               <<"     size(eV) = "<< (eV.empty() ? 0 : eV.front().size())
               <<" size(dNdX) = "<< fe.dNdX.rows() <<","<< fe.dNdX.cols()
               << std::endl;
@@ -298,52 +309,55 @@ bool DarcyNorm::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
   double rgw = problem.rhow * problem.gacc * fe.detJxW;
 
   // Evaluate the finite element pressure field
-  Vector sigmah, sigma, error;
-  if (!problem.evalSol2(sigmah,pnorm.vec,fe,X))
+  Vector dPh, dP, error;
+  if (!problem.evalDarcyVel(dPh,pnorm.vec,fe,X))
     return false;
 
-  // Integrate the energy norm a(u^h,u^h)
-  pnorm[0] += sigmah.dot(Kinv*sigmah)*rgw;
+  // Integrate the energy norm a(p^h,p^h)
+  pnorm[H1_Ph] += dPh.dot(Kinv*dPh)*rgw;
   // Evaluate the pressure field
-  double p = pnorm.vec.front().dot(fe.N);
+  double p = pnorm.vec.front().dot(fe.N,0,problem.mixed() ? 2 : 1);
   // Integrate the external energy (h,u^h)
   if (problem.extEner)
-    pnorm[1] += problem.getPotential(X)*p*fe.detJxW;
+    pnorm[EXT_ENERGY] += problem.getPotential(X)*p*fe.detJxW;
 
-  size_t ip = 2;
   if (anasol)
   {
     // Evaluate the analytical velocity
-    sigma.fill((*anasol)(X).ptr(),nrcmp);
-    // Integrate the energy norm a(u,u)
-    pnorm[ip++] += sigma.dot(Kinv*sigma)*rgw;
-    // Integrate the error in energy norm a(u-u^h,u-u^h)
-    error = sigma - sigmah;
-    pnorm[ip++] += error.dot(Kinv*error)*rgw;
+    dP.fill((*anasol)(X).ptr(),fe.dNdX.cols());
+    // Integrate the energy norm a(p,p)
+    pnorm[H1_P] += dP.dot(Kinv*dP)*rgw;
+    // Integrate the error in energy norm a(p-p^h,p-p^h)
+    error = dP - dPh;
+    pnorm[H1_E_Ph] += error.dot(Kinv*error)*rgw;
   }
 
-  for (const Vector& psol : pnorm.psol)
+  size_t ip = this->getNoFields(1);
+  size_t f = 2;
+  for (const Vector& psol : pnorm.psol) {
     if (!psol.empty())
     {
-      // Evaluate projected heat flux field
-      Vector sigmar(nrcmp);
-      for (size_t j = 0; j < nrcmp; j++)
-        sigmar[j] = psol.dot(fe.N,j,nrcmp);
+      // Evaluate projected pressure gradient
+      Vector dPr(fe.dNdX.cols());
+      for (size_t j = 0; j < fe.dNdX.cols(); j++)
+        dPr[j] = psol.dot(fe.N,j,nrcmp);
 
-      // Integrate the energy norm a(u^r,u^r)
-      pnorm[ip++] += sigmar.dot(Kinv*sigmar)*rgw;
-      // Integrate the estimated error in energy norm a(u^r-u^h,u^r-u^h)
-      error = sigmar - sigmah;
-      pnorm[ip++] += error.dot(Kinv*error)*rgw;
+      // Integrate the energy norm a(p^r,p^r)
+      pnorm[ip+H1_Pr] += dPr.dot(Kinv*dPr)*rgw;
+
+      // Integrate the estimated error in energy norm a(p^r-p^h,p^r-p^h)
+      error = dPr - dPh;
+      pnorm[ip+H1_Pr_Ph] += error.dot(Kinv*error)*rgw;
 
       if (anasol)
       {
-        // Integrate the error in the projected solution a(u-u^r,u-u^r)
-        error = sigma - sigmar;
-        pnorm[ip++] += error.dot(Kinv*error)*rgw;
-        ip++; // Make room for the local effectivity index here
+        // Integrate the error in the projected solution a(p-p^r,p-p^r)
+        error = dP - dPr;
+        pnorm[ip+H1_E_Pr] += error.dot(Kinv*error)*rgw;
       }
     }
+    ip += this->getNoFields(f++);
+  }
 
   return true;
 }
@@ -374,10 +388,12 @@ bool DarcyNorm::finalizeElement (LocalIntegral& elmInt,
 
   ElmNorm& pnorm = static_cast<ElmNorm&>(elmInt);
 
-  // Evaluate local effectivity indices as sqrt(a(e^r,e^r)/a(e,e))
-  // with e^r = u^r - u^h  and  e = u - u^h
-  for (size_t ip = 7; ip < pnorm.size(); ip += 4)
-    pnorm[ip] = sqrt(pnorm[ip-2] / pnorm[3]);
+  size_t ip = this->getNoFields(1);
+  for (size_t k = 0; k < pnorm.psol.size() && ip < pnorm.size(); ++k, ip += this->getNoFields(k+2)) {
+    if (ip >= pnorm.size())
+      std::cout << "panic" << std::endl;
+    pnorm[ip+EFF_REC_Ph] = sqrt(pnorm[ip+H1_Pr_Ph] / pnorm[H1_E_Ph]);
+  }
 
   return true;
 }
@@ -388,36 +404,33 @@ size_t DarcyNorm::getNoFields (int group) const
   if (group < 1)
     return this->NormBase::getNoFields();
   else
-    return anasol ? 4 : 2;
+    return 7;
 }
 
 
 std::string DarcyNorm::getName (size_t i, size_t j, const char* prefix) const
 {
-  if (i == 0 || j == 0 || j > 4)
-    return this->NormBase::getName(i,j,prefix);
-
-  static const char* s[8] = {
-    "a(u^h,u^h)^0.5",
-    "(h,u^h)^0.5",
-    "a(u,u)^0.5",
-    "a(e,e)^0.5, e=u-u^h",
-    "a(u^r,u^r)^0.5",
-    "a(e,e)^0.5, e=u^r-u^h",
-    "a(e,e)^0.5, e=u-u^r",
+  static const char* s[14] = {
+    "a(p^h,p^h)^0.5",
+    "(h,p^h)^0.5",
+    "a(c^h,c^h)^0.5",
+    "a(p,p)^0.5",
+    "a(e,e)^0.5, e=p-p^h",
+    "a(c,c)^0.5",
+    "a(e,e)^0.5, e=c-c^h",
+    "a(p^r,p^r)^0.5",
+    "a(c^r,c^r)^0.5",
+    "a(e,e)^0.5, e=p^r-p^h",
+    "a(e,e)^0.5, e=p-p^r",
+    "a(e,e)^0.5, e=c^r-c^h",
+    "a(e,e)^0.5, e=c-c^r",
     "effectivity index"
   };
 
-  size_t k = i > 1 ? j+3 : j-1;
+  size_t k = i > 1 ? j+7 : j-1;
 
   if (!prefix)
     return s[k];
 
   return prefix + std::string(" ") + s[k];
-}
-
-
-bool DarcyNorm::hasElementContributions (size_t i, size_t j) const
-{
-  return i > 1 || j != 2;
 }

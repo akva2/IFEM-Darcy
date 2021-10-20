@@ -4,24 +4,26 @@
 
   <!-- General - geometry definitions !-->
   <geometry dim="2" sets="true" Lx="10" Ly="5">
-    <refine  patch="1" u="15" v="15"/>
+    <refine  patch="1" u="63" v="63"/>
   </geometry>
 
   <!-- General - boundary conditions !-->
   <boundaryconditions>
-    <dirichlet set="Edge4" comp="1"/>
+    <dirichlet set="Edge4" comp="1" type="constant">1</dirichlet>
   </boundaryconditions>
 
   <!-- Problem-specific block !-->
   <darcy>
     <source type="diracsum" pointTol="1e-1">
       # X Y Val\
-      5.0 2.5 1\
-      1.0 4.0 1\
-      8.0 2.0 1\
-      8.0 4.0 1
+      5.0 2.5 100
+      2.5 2.5 100\
+      7.5 2.5 100\
+      5.0 4.0 100
     </source>
     <permvalues>1.2|1.2</permvalues>
+    <porosity>1.0</porosity>
+    <dispersivity>1.0</dispersivity>
   </darcy>
 
 </simulation>
