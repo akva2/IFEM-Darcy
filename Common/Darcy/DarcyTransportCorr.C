@@ -71,36 +71,38 @@ LocalIntegral* DarcyTransportCorr::getLocalIntegral (size_t nen, size_t,
 bool DarcyTransportCorr::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
                                   const TimeDomain& time, const Vec3& X) const
 {
+  const double eps = 1.0e-6;
+
   ElmMats& elMat = static_cast<ElmMats&>(elmInt);
 
   const double C = (*observed_C)(X);
   const Vec3 dC = observed_C->gradient(X);
   const double dCdt = observed_C->timeDerivative(X);
   const Vec3 q = (*input_q)(X);
-  const double f = (*this->input_source)(X);
+  const double f = (*input_source)(X);
+  const double scale = 1.0 / (eps + q.length2());
 
-  EqualOrderOperators::Weak::Mass(elMat.A[0], fe);
-  for (size_t i = 1; i <= fe.N.size(); ++i) {
+  EqualOrderOperators::Weak::Mass(elMat.A[0], fe, scale);
+  EqualOrderOperators::Weak::Source(elMat.b[0], fe, q, scale);
+
+  for (size_t i = 1; i <= fe.N.size(); ++i)
     for (size_t j = 1; j <= fe.N.size(); ++j)
-      for (int d = 1; d <= nsd; ++d) {
-          for (int d2 = 1; d2 <= nsd; ++d2) {
-            const double mass_term = fe.dNdX(i,d) * fe.dNdX(j,d2);
-            const double transport_term = (dC[d2-1]*fe.N(j) + C * fe.dNdX(j,d2)) *
-                                          (dC[d-1]*fe.N(i) + C * fe.dNdX(i,d));
-            elMat.A[1]((i-1)*nsd + d, (j-1)*nsd + d2) += mass_term * fe.detJxW;
-            elMat.A[2]((i-1)*nsd + d, (j-1)*nsd + d2) += transport_term * fe.detJxW;
-          }
-      }
-  }
+      for (int k = 1; k <= nsd; ++k)
+        for (int l = 1; l <= nsd; ++l)
+        {
+          const double mass_term = fe.dNdX(i,k) * fe.dNdX(j,l);
+          const double transport_term = ((dC(k)*fe.N(i) + C*fe.dNdX(i,k)) *
+                                         (dC(l)*fe.N(j) + C*fe.dNdX(j,l)));
+          elMat.A[1]((i-1)*nsd+k, (j-1)*nsd+l) += mass_term * fe.detJxW;
+          elMat.A[2]((i-1)*nsd+k, (j-1)*nsd+l) += transport_term * fe.detJxW;
+        }
 
-  for (size_t i = 1; i <= fe.N.size(); ++i) {
-    for (int d = 1; d <= nsd; ++d) {
-      const double transport_term = (f - dCdt) * (dC[d-1]*fe.N(i) + C * fe.dNdX(i,d));
+  for (size_t i = 1; i <= fe.N.size(); ++i)
+    for (int d = 1; d <= nsd; ++d)
+    {
+      const double transport_term = (f-dCdt) * (dC(d)*fe.N(i) + C*fe.dNdX(i,d));
       elMat.b[2]((i-1)*nsd + d) += transport_term * fe.detJxW;
     }
-  }
-
-  EqualOrderOperators::Weak::Source(elMat.b[0], fe, q);
 
   return true;
 }
