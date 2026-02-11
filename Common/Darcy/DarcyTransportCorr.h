@@ -14,7 +14,6 @@
 #ifndef _DARCY_TRANSPORT_CORR_H_
 #define _DARCY_TRANSPORT_CORR_H_
 
-#include "FiniteElement.h"
 #include "IntegrandBase.h"
 
 #include <memory>
@@ -49,18 +48,19 @@ public:
   //! \brief Empty destructor.
   ~DarcyTransportCorr() override;
 
+  //! \brief Parses a data section from an XML element.
+  bool parse(const tinyxml2::XMLElement* elem) override;
+
   using IntegrandBase::getLocalIntegral;
   //! \brief Returns a local integral container for the given element.
   //! \param[in] nen Number of nodes on element
-  //! \param[in] neumann Whether or not we are assembling Neumann BCs
-   LocalIntegral* getLocalIntegral(size_t nen, size_t,
-                                   bool neumann) const override;
+  LocalIntegral* getLocalIntegral(size_t nen,
+                                  size_t, bool) const override;
 
   //! \brief Returns a local integral container for the given element
   //! \param[in] nen Number of nodes on element
-  //! \param[in] neumann Whether or not we are assembling Neumann BCs
   LocalIntegral* getLocalIntegral(const std::vector<size_t>& nen,
-                                  size_t, bool neumann) const override;
+                                  size_t, bool) const override;
 
   using IntegrandBase::evalInt;
   //! \brief Evaluates the integrand at an interior point.
@@ -69,8 +69,7 @@ public:
   //! \param[in] time Time stepping parameters
   //! \param[in] X Cartesian coordinates of current integration point
   bool evalInt(LocalIntegral& elmInt, const FiniteElement& fe,
-               const TimeDomain& time,
-               const Vec3& X) const override;
+               const TimeDomain& time, const Vec3& X) const override;
 
   using IntegrandBase::evalIntMx;
   //! \brief Evaluates the integrand at an interior point.
@@ -78,17 +77,7 @@ public:
   //! \param[in] fe Finite element data of current integration point
   //! \param[in] X Cartesian coordinates of current integration point
   bool evalIntMx(LocalIntegral& elmInt, const MxFiniteElement& fe,
-                 const TimeDomain& time,
-                 const Vec3& X) const override;
-
-  using IntegrandBase::evalBou;
-  //! \brief Evaluates the integrand at a boundary point.
-  //! \param elmInt The local integral object to receive the contributions
-  //! \param[in] fe Finite element data of current integration point
-  //! \param[in] X Cartesian coordinates of current integration point
-  //! \param[in] normal Boundary normal vector at current integration point
-  bool evalBou(LocalIntegral& elmInt, const FiniteElement& fe,
-               const Vec3& X, const Vec3& normal) const override;
+                 const TimeDomain& time, const Vec3& X) const override;
 
   using IntegrandBase::finalizeElement;
   //! \brief Finalizes the element quantities after the numerical integration.
@@ -103,10 +92,9 @@ public:
   //! \param[in] fe Finite element data at current point
   //! \param[in] X Cartesian coordinates of current integration point
   //! \param[in] MNPC Matrix of nodal point correspondance
-  bool evalSol (Vector& s,
-                const FiniteElement& fe,
-                const Vec3& X,
-                const std::vector<int>& MNPC) const override;
+  bool evalSol(Vector& s,
+               const FiniteElement& fe, const Vec3& X,
+               const std::vector<int>& MNPC) const override;
 
   //! \brief Returns the number of primary/secondary solution field components.
   //! \param[in] fld which field set to consider (1=primary, 2=secondary)
@@ -124,30 +112,16 @@ public:
   //! \param[in] prefix Name prefix for all components
   std::string getField2Name(size_t i, const char* prefix) const override;
 
-  //! \brief Set observed concentration.
-  void setObservedConcentration(std::unique_ptr<RealFunc> obs_c);
-
-  //! \brief Set input source function.
-  void setInputSource(std::unique_ptr<RealFunc> f);
-
-  //! \brief Set input Darcy velocity.
-  void setInputVelocity(std::unique_ptr<VecFunc> inp_q);
-
-  //! \brief Set penalty parameter.
-  void setMassPenaltyParam(const double nmu) { alpha = nmu;}
-
-  //! \brief Set penalty parameter.
-  void setTransportPenaltyParam(const double nmu) { beta = nmu;}
-
 private:
 
   double residual(const Vec3& X) const;
 
-  double alpha = 1e6; //!< Mass penalty parameter
-  double beta = 1e6; //!< Transport penalty parameter
-  std::unique_ptr<VecFunc> input_q; //!< Input Darcy velocity
+  double alpha = 1.0e6;  //!< Mass penalty parameter
+  double beta  = 1.0e6;  //!< Transport penalty parameter
+  double eps   = 1.0e-6; //!< Division by zero tolerance in mass-term scaling
+  std::unique_ptr<VecFunc>  input_q;      //!< Input Darcy velocity
   std::unique_ptr<RealFunc> input_source; //!< Input source
-  std::unique_ptr<RealFunc> observed_C; //!< Observed tracer concentration
+  std::unique_ptr<RealFunc> observed_C;   //!< Observed tracer concentration
 };
 
 #endif

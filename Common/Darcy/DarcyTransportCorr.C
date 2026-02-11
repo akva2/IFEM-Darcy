@@ -16,18 +16,19 @@
 #include "BlockElmMats.h"
 #include "EqualOrderOperators.h"
 #include "FiniteElement.h"
-#include "Function.h"
-#include "GlobalIntegral.h"
+#include "Functions.h"
+#include "ExprFunctions.h"
 #include "LocalIntegral.h"
-#include "SIMbase.h"
 #include "TimeDomain.h"
 #include "Utilities.h"
 #include "Vec3.h"
 #include "Vec3Oper.h"
+#include "IFEM.h"
+#include "tinyxml2.h"
 
 #include <array>
 #include <cmath>
-#include <vector>
+#include <cstring>
 
 
 DarcyTransportCorr::DarcyTransportCorr (unsigned short int n, int torder) :
@@ -41,9 +42,63 @@ DarcyTransportCorr::DarcyTransportCorr (unsigned short int n, int torder) :
 DarcyTransportCorr::~DarcyTransportCorr() = default;
 
 
+bool DarcyTransportCorr::parse (const tinyxml2::XMLElement* elem)
+{
+  if (!strcasecmp(elem->Value(),"observed_concentration"))
+  {
+    std::string type;
+    utl::getAttribute(elem,"type",type);
+    IFEM::cout <<"\tObserved concentration function:";
+    const char* input = utl::getValue(elem, "observed_concentration");
+    if (input && type == "expression") {
+      IFEM::cout << " " << input << std::endl;
+      observed_C.reset(utl::parseExprRealFunc(input,true));
+    }
+    else
+      observed_C.reset(utl::parseRealFunc(input));
+  }
+  else if (!strcasecmp(elem->Value(),"input_source"))
+  {
+    std::string type;
+    utl::getAttribute(elem,"type",type);
+    IFEM::cout <<"\tInput source function:";
+    const char* input = utl::getValue(elem, "input_source");
+    if (input && type == "expression") {
+      IFEM::cout << " " << input << std::endl;
+      input_source = std::make_unique<EvalFunction>(input);
+    }
+    else
+      input_source.reset(utl::parseRealFunc(input));
+  }
+  else if (!strcasecmp(elem->Value(),"input_velocity"))
+  {
+    std::string type;
+    utl::getAttribute(elem,"type",type);
+    IFEM::cout <<"\tInput velocity function:";
+    const char* input = utl::getValue(elem, "input_velocity");
+    if (input && type == "expression") {
+      IFEM::cout << " " << input << std::endl;
+      input_q = std::make_unique<VecFuncExpr>(input);
+    }
+    else
+      input_q.reset(utl::parseExprVecFunc(input,true));
+  }
+  else if (!strcasecmp(elem->Value(),"penalty"))
+  {
+    utl::getAttribute(elem, "alpha", alpha);
+    utl::getAttribute(elem, "beta", beta);
+    utl::getAttribute(elem, "eps", eps);
+  }
+  else
+    return false;
+
+  return true;
+}
+
+
 LocalIntegral*
 DarcyTransportCorr::getLocalIntegral (const std::vector<size_t>& nen,
-                                      size_t, bool neumann) const
+                                      size_t, bool) const
 {
   BlockElmMats* result = new BlockElmMats(3, true ? 3 : 2);
 
@@ -58,8 +113,8 @@ DarcyTransportCorr::getLocalIntegral (const std::vector<size_t>& nen,
   return result;
 }
 
-LocalIntegral* DarcyTransportCorr::getLocalIntegral (size_t nen, size_t,
-                                                     bool neumann) const
+LocalIntegral* DarcyTransportCorr::getLocalIntegral (size_t nen,
+                                                     size_t, bool) const
 {
   ElmMats* result = new ElmMats();
   result->resize(3,3);
@@ -71,8 +126,6 @@ LocalIntegral* DarcyTransportCorr::getLocalIntegral (size_t nen, size_t,
 bool DarcyTransportCorr::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
                                   const TimeDomain& time, const Vec3& X) const
 {
-  const double eps = 1.0e-6;
-
   ElmMats& elMat = static_cast<ElmMats&>(elmInt);
 
   const double C = (*observed_C)(X);
@@ -80,7 +133,7 @@ bool DarcyTransportCorr::evalInt (LocalIntegral& elmInt, const FiniteElement& fe
   const double dCdt = observed_C->timeDerivative(X);
   const Vec3 q = (*input_q)(X);
   const double f = (*input_source)(X);
-  const double scale = 1.0 / (eps + q.length2());
+  const double scale = eps > 0.0 ? 1.0 / (eps + q.length2()) : 1.0;
 
   EqualOrderOperators::Weak::Mass(elMat.A[0], fe, scale);
   EqualOrderOperators::Weak::Source(elMat.b[0], fe, q, scale);
@@ -109,7 +162,7 @@ bool DarcyTransportCorr::evalInt (LocalIntegral& elmInt, const FiniteElement& fe
 
 
 bool DarcyTransportCorr::evalIntMx (LocalIntegral& elmInt, const MxFiniteElement& fe,
-                                  const TimeDomain& time, const Vec3& X) const
+                                    const TimeDomain& time, const Vec3& X) const
 {
   ElmMats& elMat = static_cast<ElmMats&>(elmInt);
 
@@ -135,13 +188,6 @@ bool DarcyTransportCorr::evalIntMx (LocalIntegral& elmInt, const MxFiniteElement
 }
 
 
-bool DarcyTransportCorr::evalBou (LocalIntegral& elmInt, const FiniteElement& fe,
-                              const Vec3& X, const Vec3& normal) const
-{
-  return true;
-}
-
-
 bool DarcyTransportCorr::finalizeElement (LocalIntegral& A)
 {
   ElmMats& E = static_cast<ElmMats&>(A);
@@ -156,16 +202,15 @@ bool DarcyTransportCorr::finalizeElement (LocalIntegral& A)
 }
 
 
-bool DarcyTransportCorr::evalSol (Vector& s, const FiniteElement& fe,
-                                  const Vec3& X,
+bool DarcyTransportCorr::evalSol (Vector& s,
+                                  const FiniteElement& fe, const Vec3& X,
                                   const std::vector<int>& MNPC) const
 {
   s.resize(this->getNoFields(2));
   s[0] = (*observed_C)(X);
-  const auto q = (*input_q)(X);
-  const double f = (*input_source)(X);
   s[1] = this->residual(X);
-  s[2] = f;
+  s[2] = (*input_source)(X);
+  const Vec3 q = (*input_q)(X);
   for (size_t i = 0; i < nsd; ++i)
     s[3+i] = q[i];
   return true;
@@ -215,30 +260,12 @@ std::string DarcyTransportCorr::getField2Name (size_t i, const char* prefix) con
 }
 
 
-void DarcyTransportCorr::setObservedConcentration (std::unique_ptr<RealFunc> obs_c)
-{
-  observed_C = std::move(obs_c);
-}
-
-
-void DarcyTransportCorr::setInputSource (std::unique_ptr<RealFunc> f)
-{
-  input_source = std::move(f);
-}
-
-
-void DarcyTransportCorr::setInputVelocity (std::unique_ptr<VecFunc> inp_q)
-{
-  input_q = std::move(inp_q);
-}
-
-
 double DarcyTransportCorr::residual (const Vec3& X) const
 {
   const double C = (*observed_C)(X);
   const Vec3 q = (*input_q)(X);
   const Vec3 grad_C = observed_C->gradient(X);
-  const auto grad_q = input_q->gradient(X);
+  const Tensor grad_q = input_q->gradient(X);
   const double f = (*input_source)(X);
   const double eq = -(grad_C[0]*q[0] + C*grad_q(1,1) +
                       grad_C[1]*q[1] + C*grad_q(2,2));
