@@ -29,10 +29,23 @@
 #include "SIMenums.h"
 #include "TimeStep.h"
 #include "Utilities.h"
-
-#include <cassert>
-#include <cstring>
 #include "tinyxml2.h"
+
+#include <cstring>
+
+
+namespace
+{
+  //! \brief Analytical solution class for DarcyTransportCorr
+  class DarcyTCorr : public AnaSol
+  {
+  public:
+    //! \brief Constructor initializing expression functions from XML tags.
+    explicit DarcyTCorr(const tinyxml2::XMLElement* xml) : AnaSol(xml,false) {}
+    //! \brief Override parent class method to avoid the secondary solution.
+    void setupSecondarySolutions() override {}
+  };
+}
 
 
 template<class Dim>
@@ -72,7 +85,7 @@ bool SIMDarcyTransportCorr<Dim>::parse (const tinyxml2::XMLElement* elem)
     return this->Dim::parse(elem);
 
   const tinyxml2::XMLElement* child = elem->FirstChildElement();
-  for (; child; child = child->NextSiblingElement()) {
+  for (; child; child = child->NextSiblingElement())
     if (!strcasecmp(child->Value(),"observed_concentration")) {
       std::string type;
       utl::getAttribute(child,"type",type);
@@ -119,12 +132,9 @@ bool SIMDarcyTransportCorr<Dim>::parse (const tinyxml2::XMLElement* elem)
       std::string type;
       utl::getAttribute(child,"type",type,true);
       if (type == "expression")
-        this->mySol = new AnaSol(child,false);
-      else
-          assert(0);
+        this->mySol = new DarcyTCorr(child);
      } else
       this->Dim::parse(child);
-  }
 
   return true;
 }
