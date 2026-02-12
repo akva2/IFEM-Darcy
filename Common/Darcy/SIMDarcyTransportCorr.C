@@ -224,8 +224,23 @@ printSolutionSummary (const Vector& solvec, int, const char*,
         str <<"\n               Max "<< char('X'+d)
             <<"-Darcy velocity : "<< dMax[d] <<" node "<< iMax[d];
   }
+  IFEM::cout << str.str() << std::endl;
 
-  IFEM::cout << str.str() << std::endl;;
+  // Evaluate solution norms
+  Matrix  eNorm;
+  Vectors gNorm;
+  this->setQuadratureRule(Dim::opt.nGauss[1]);
+  if (!this->solutionNorms(qSol,eNorm,gNorm))
+    return;
+
+  double diff = sqrt(gNorm.front()[2]/gNorm.front()[0]);
+  double divQ = sqrt(gNorm.front()[3]/gNorm.front()[0]);
+  double resQ = sqrt(gNorm.front()[4]/gNorm.front()[1]);
+
+  IFEM::cout <<"\nL2(q - q^) / L2(q^) = "<< 100.0*diff
+	     <<"%\nL2(div q^) / L2(q^) = "<< 100.0*divQ
+	     <<"%\nL2(res q^) / L2(c*q^) = "<< 100.0*resQ
+	     <<"%"<< std::endl;
 }
 
 
