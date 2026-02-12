@@ -19,10 +19,11 @@
 #include <memory>
 
 class RealFunc;
+class Tensor;
 
 
 /*!
-  \brief Class representing the integrand of the Darcy transport correction problem.
+  \brief Class representing the integrand of the transport correction problem.
 */
 
 class DarcyTransportCorr : public IntegrandBase
@@ -42,10 +43,9 @@ public:
     NMAT = 10
   };
 
-  //! \brief The constructor initializes all pointers to zero.
-  explicit DarcyTransportCorr(unsigned short int n, int torder = 0);
-
-  //! \brief Empty destructor.
+  //! \brief Default constructor.
+  explicit DarcyTransportCorr(unsigned short int n = 3);
+  //! \brief Default destructor.
   ~DarcyTransportCorr() override;
 
   //! \brief Parses a data section from an XML element.
@@ -54,8 +54,7 @@ public:
   using IntegrandBase::getLocalIntegral;
   //! \brief Returns a local integral container for the given element.
   //! \param[in] nen Number of nodes on element
-  LocalIntegral* getLocalIntegral(size_t nen,
-                                  size_t, bool) const override;
+  LocalIntegral* getLocalIntegral(size_t nen, size_t, bool) const override;
 
   //! \brief Returns a local integral container for the given element
   //! \param[in] nen Number of nodes on element
@@ -86,19 +85,17 @@ public:
   //! element quantities are assembled into their system level equivalents.
   bool finalizeElement(LocalIntegral& elmInt) override;
 
-  using IntegrandBase::evalSol;
   //! \brief Evaluates the secondary solution at a result point.
   //! \param[out] s Array of solution field values at current point
+  //! \param[in] eV Element-level primary solution vectors
   //! \param[in] fe Finite element data at current point
   //! \param[in] X Cartesian coordinates of current integration point
-  //! \param[in] MNPC Matrix of nodal point correspondance
-  bool evalSol(Vector& s,
-               const FiniteElement& fe, const Vec3& X,
-               const std::vector<int>& MNPC) const override;
+  bool evalSol2(Vector& s, const Vectors& eV,
+                const FiniteElement& fe, const Vec3& X) const override;
 
   //! \brief Returns the number of primary/secondary solution field components.
   //! \param[in] fld which field set to consider (1=primary, 2=secondary)
-  size_t getNoFields(int fld) const override { return fld > 1 ? nsd+3 : nsd; }
+  size_t getNoFields(int fld) const override { return fld > 1 ? 4+nsd : nsd; }
 
   //! \brief Filters a result components for output.
   bool suppressOutput(size_t i, ASM::ResultClass type) const override;
@@ -112,10 +109,30 @@ public:
   //! \param[in] prefix Name prefix for all components
   std::string getField2Name(size_t i, const char* prefix) const override;
 
-private:
+  //! \brief Returns a pointer to an Integrand for solution norm evaluation.
+  //! \note The Integrand object is allocated dynamically and has to be deleted
+  //! manually when leaving the scope of the pointer variable receiving the
+  //! returned pointer value.
+  NormBase* getNormIntegrand(AnaSol*) const override;
 
+  //! \brief Evaluates the FE solution.
+  Vec3 evalSol(const Vector& eV, const Vector& N) const;
+  //! \brief Evaluates the FE solution gradient.
+  Tensor evalGrd(const Vector& eV, const Matrix& dNdX) const;
+
+  //! \brief Evaluates the input velocity function.
+  Vec3 evalInput(const Vec3& X) const;
+  //! \brief Evaluates the tracer concentration solution.
+  double evalTracer(const Vec3& X) const;
+
+  //! \brief Evaluates the residual using the input velocity.
   double residual(const Vec3& X) const;
 
+  //! \brief Evaluates the residual in the FE solution.
+  double residual(const Vector& eV,
+                  const Vector& N, const Matrix& dNdX, const Vec3& X) const;
+
+private:
   double alpha = 1.0e6;  //!< Mass penalty parameter
   double beta  = 1.0e6;  //!< Transport penalty parameter
   double eps   = 1.0e-6; //!< Division by zero tolerance in mass-term scaling
@@ -123,5 +140,38 @@ private:
   std::unique_ptr<RealFunc> input_source; //!< Input source
   std::unique_ptr<RealFunc> observed_C;   //!< Observed tracer concentration
 };
+
+
+/*!
+  \brief Class representing the integrand of Darcy transport correction norms.
+*/
+
+class DarcyTCNorm : public NormBase
+{
+public:
+  //! \brief The constructor forwards to the parent class constructor.
+  explicit DarcyTCNorm(DarcyTransportCorr& p): NormBase(p) {}
+  //! \brief Default destructor.
+  virtual ~DarcyTCNorm();
+
+  using NormBase::evalInt;
+  //! \brief Evaluates the integrand at an interior point.
+  //! \param elmInt The local integral object to receive the contributions
+  //! \param[in] fe Finite element data of current integration point
+  //! \param[in] X Cartesian coordinates of current integration point
+  bool evalInt(LocalIntegral& elmInt, const FiniteElement& fe,
+               const Vec3& X) const override;
+
+  //! \brief Returns the number of norm groups or size of a specified group.
+  //! \param[in] group The norm group to return the size of
+  //! (if zero, return the number of groups)
+  size_t getNoFields(int group) const override;
+
+  //! \brief Returns the name of a norm quantity.
+  //! \param[in] j The norm number (one-based index)
+  //! \param[in] prefix Common prefix for all norm names
+  std::string getName(size_t, size_t j, const char* prefix) const override;
+};
+
 
 #endif
